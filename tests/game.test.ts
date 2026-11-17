@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Game, ROLES, ROLE_INFO, side, type Role } from '../src/game.ts';
+import { Game, ROLES, side, type Role } from '../src/game.ts';
 
 function random(seed = 42) {
   return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
@@ -75,28 +75,34 @@ test('all characters can throw repeatedly without resources or cooldown but must
     for (const team of ['blue', 'red'] as const) assert.equal(g.trash.filter(t => t.team === team).length, 60);
   }
 });
-test('bomb is free, creates five scraps and respects cooldown', () => {
+test('bomb can be fired twice immediately and creates five scraps per shot', () => {
   const g = solo('blaster'), p = g.player;
   assert.equal(g.skill(p, { x: 8, z: 0 }), null);
-  assert.equal(p.skillReady, 15); assert.ok(g.skill(p, { x: 8, z: 0 })); assert.equal(g.shots.length, 1);
+  assert.equal(g.skill(p, { x: 8, z: 0 }), null);
+  assert.equal(g.time, 0); assert.equal(g.shots.length, 2); assert.equal(p.throws, 2);
   advance(g, 1.3);
-  assert.equal(g.trash.filter(t => t.team === 'red').length, 35); assert.equal(g.trash.filter(t => !t.natural).length, 5);
-  advance(g, 13.75); assert.equal(g.skill(p, { x: 8, z: 0 }), null);
+  assert.equal(g.trash.filter(t => t.team === 'red').length, 40); assert.equal(g.trash.filter(t => !t.natural).length, 10);
 });
-test('every character can use its skill immediately when its position and targets are valid', () => {
+test('every character can use its skill repeatedly without advancing the clock', () => {
   for (const role of ROLES) {
     const g = solo(role), p = g.player; p.x = -2; p.z = 0; g.trash = [];
-    g.addTrash('blue', p, false);
-    assert.equal(g.skill(p, { x: 8, z: 0 }), null);
-    assert.equal(p.skillReady, ROLE_INFO[role].cooldown);
+    for (let i = 0; i < 2; i++) {
+      for (let j = 0; j < 3; j++) g.addTrash('blue', p, false);
+      assert.equal(g.skill(p, { x: 8, z: 0 }), null);
+    }
+    assert.equal(g.time, 0);
+    if (role === 'guardian') assert.equal(g.shields.length, 2);
+    if (role === 'blaster') assert.equal(g.shots.length, 2);
+    if (role === 'cleaner') assert.equal(p.cleaned, 6);
   }
 });
-test('blaster AI fires its bomb immediately', () => {
+test('blaster AI can choose another bomb immediately after its first shot', () => {
   const g = solo(), ai = g.actors.find(a => a.team === 'red' && a.role === 'blaster')!;
-  ai.player = false;
+  ai.player = false; ai.aiAttack = true;
   g.update(.05);
-  assert.ok(g.shots.some(s => s.actor === ai.id && s.bomb));
-  assert.equal(ai.skillReady, 15.05);
+  ai.aiAttack = true;
+  g.update(.05);
+  assert.equal(g.shots.filter(s => s.actor === ai.id && s.bomb).length, 2);
 });
 test('AI can throw repeatedly without waiting and still chooses cleaning between attacks', () => {
   const g = solo(), ai = g.actors[1]; ai.player = false; ai.x = -2; ai.z = 0; ai.aiAttack = true;
@@ -108,7 +114,7 @@ test('guardian shield reflects basic debris and bombs and expires after five sec
   for (const bomb of [false, true]) {
     const g = solo('guardian'), p = g.player, enemy = g.actors[4];
     p.x = -2; p.z = 0; enemy.x = 2; enemy.z = 0; enemy.role = 'blaster';
-    assert.equal(g.skill(p, { x: 8, z: 0 }), null); assert.equal(p.skillReady, 15);
+    assert.equal(g.skill(p, { x: 8, z: 0 }), null);
     if (bomb) g.skill(enemy, { x: -8, z: 0 }); else g.throw(enemy, { x: -8, z: 0 });
     advance(g, 2); assert.equal(g.trash.filter(t => t.team === 'blue').length, 30);
     assert.equal(g.trash.filter(t => t.team === 'red').length, bomb ? 35 : 31);
@@ -120,12 +126,13 @@ test('shield covers a local boundary segment rather than the entire map', () => 
   g.skill(p, { x: 8, z: 0 }); g.throw(enemy, { x: -8, z: 8 }); advance(g, 1.1);
   assert.equal(g.trash.filter(t => t.team === 'blue').length, 31); assert.ok(!g.events.some(e => e.type === 'reflect'));
 });
-test('cleaner removes at most three nearby scraps and cannot ignore an eight-second cooldown', () => {
+test('cleaner removes at most three nearby scraps per use and can absorb again immediately', () => {
   const g = solo(), p = g.player; g.trash = [];
   for (let i = 0; i < 5; i++) g.addTrash('blue', { x: p.x + i * .1, z: p.z }, true);
   g.addTrash('blue', { x: -1, z: 8 }, true);
   assert.equal(g.skill(p, { x: 8, z: 0 }), null); assert.equal(p.cleaned, 3); assert.equal(g.trash.length, 3);
-  assert.equal(p.skillReady, 8); assert.ok(g.skill(p, { x: 8, z: 0 })); assert.equal(g.trash.length, 3);
+  assert.equal(g.skill(p, { x: 8, z: 0 }), null); assert.equal(p.cleaned, 5); assert.equal(g.trash.length, 1);
+  assert.ok(g.skill(p, { x: 8, z: 0 })); assert.equal(g.time, 0);
 });
 test('purity stays between zero and one hundred and decreases with extra debris', () => {
   const g = solo(); g.trash = []; assert.equal(g.purity('blue'), 100);
@@ -149,25 +156,22 @@ test('match ends at exactly 180 seconds, freezes actions and chooses purity winn
 test('restarting constructs a clean match for every character', () => {
   for (const role of ROLES) {
     const g = new Game(role); assert.equal(g.time, 0); assert.equal(g.trash.length, 60);
-    assert.equal(g.player.cleaned, 0); assert.equal(g.player.throws, 0); assert.equal(g.player.skillReady, 0); assert.equal(g.finished, false);
+    assert.equal(g.player.cleaned, 0); assert.equal(g.player.throws, 0); assert.equal(g.finished, false);
   }
 });
 test('five AIs clean, attack and use all three skills during complete matches', () => {
   for (const role of ROLES) {
     const g = new Game(role, random());
     const usedSkills = new Set<Role>(); let shots = 0;
-    const readyTimes = new Map<number, number>();
     for (let i = 0; i < 3601; i++) {
       g.update(.05);
       for (const a of g.actors) {
         assert.ok(side(a.team) * a.x >= .75 && Math.abs(a.x) <= 14.2 && Math.abs(a.z) <= 8.2);
-        assert.ok(a.skillReady <= g.time + ROLE_INFO[a.role].cooldown + .001);
-        const previous = readyTimes.get(a.id) ?? 0;
-        if (a.skillReady > previous) {
-          assert.ok(g.time + .001 >= previous, `${a.name} must wait for its skill cooldown`);
-          readyTimes.set(a.id, a.skillReady);
-        }
-        if (a.skillReady > 0) usedSkills.add(a.role);
+      }
+      for (const e of g.events) {
+        if (e.type === 'shield') usedSkills.add('guardian');
+        if (e.type === 'suction') usedSkills.add('cleaner');
+        if (e.type === 'bomb') usedSkills.add('blaster');
       }
       shots = Math.max(shots, g.actors.reduce((sum, a) => sum + a.throws, 0)); g.events = [];
     }
