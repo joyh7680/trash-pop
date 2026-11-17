@@ -5,12 +5,12 @@ export const ROLES: Role[] = ['guardian', 'blaster', 'cleaner'];
 export const ROLE_INFO = {
   guardian: { name: '가디언', role: '방어형', skill: '쓰레기 반사막', cooldown: 15, color: '#70caff', description: '5초 동안 날아오는 쓰레기를 반사해요.', hint: '경계선 근처에서 사용 · 5초 지속' },
   blaster: { name: '블래스터', role: '공격형', skill: '오염 폭탄', cooldown: 15, color: '#ffb15c', description: '오염 폭탄으로 상대 구역에 쓰레기 5개!', hint: '자원 소비 없음 · 마우스로 조준' },
-  cleaner: { name: '클리너', role: '정화형', skill: '강력 흡입', cooldown: 8, color: '#b6f879', description: '주변 쓰레기 3개를 한 번에 정화해요.', hint: '주변 최대 3개 제거 · 자원 획득 가능' },
+  cleaner: { name: '클리너', role: '정화형', skill: '강력 흡입', cooldown: 8, color: '#b6f879', description: '주변 쓰레기 3개를 한 번에 정화해요.', hint: '주변 최대 3개 제거 · 즉시 정화' },
 };
 export interface Actor extends Point {
   id: number; team: Team; role: Role; player: boolean; name: string;
-  resources: number; recycled: number; cleaned: number; throws: number;
-  skillReady: number; throwReady: number; target: number | null; cleaning: number;
+  cleaned: number; throws: number;
+  skillReady: number; target: number | null; cleaning: number;
   moving: boolean; facing: number; aiAttack: boolean;
 }
 export interface Trash extends Point { id: number; team: Team; natural: boolean; kind: number; claimed: number | null }
@@ -43,7 +43,7 @@ export class Game {
         this.actors.push({ id: this.id++, team, role: r, player: team === 'blue' && i === 0,
           name: team === 'blue' && i === 0 ? '나' : `${team === 'blue' ? '블루' : '레드'} ${ROLE_INFO[r].name}`,
           x: side(team) * (i === 0 ? 8 : 11), z: (i - 1) * 4,
-          resources: 1, recycled: 0, cleaned: 0, throws: 0, skillReady: 0, throwReady: 0,
+          cleaned: 0, throws: 0, skillReady: 0,
           target: null, cleaning: 0, moving: false, facing: 0, aiAttack: false });
       });
     }
@@ -98,18 +98,11 @@ export class Game {
   private removeTrash(a: Actor, t: Trash) {
     this.trash = this.trash.filter(item => item.id !== t.id);
     a.cleaned++;
-    if (t.natural) {
-      a.recycled++;
-      if (a.recycled >= 3) { a.resources = Math.min(5, a.resources + 1); a.recycled = 0; }
-    }
     this.events.push({ type: 'clean', x: t.x, z: t.z, team: a.team });
   }
   throw(a: Actor, aim: Point): string | null {
     if (this.finished) return null;
-    if (this.time < a.throwReady) return '투척을 준비하고 있어요.';
-    if (a.resources < 1) return '기본 쓰레기 3개를 청소해 자원을 모으세요.';
     if (Math.abs(a.x) > 4.2) return '가운데 경계선 근처에서 던질 수 있어요.';
-    a.resources--; a.throwReady = this.time + 3;
     this.launch(a, aim, false);
     return null;
   }
@@ -151,8 +144,8 @@ export class Game {
     }
     if (a.role === 'cleaner' && this.trash.filter(t => t.team === a.team && distance(t, a) <= 3.8 && t.claimed === null).length >= 2) this.skill(a, aim);
     if (a.role === 'blaster' && this.time >= a.skillReady) { this.skill(a, aim); a.aiAttack = false; }
-    const attackCost = a.role === 'blaster' ? 1 : 3;
-    if (a.resources >= attackCost && this.time >= a.throwReady && !a.target) a.aiAttack = true;
+    // Occasional attack decisions keep AI cleaning even when throwing is unlimited.
+    if (a.target === null && this.random() < dt * .12) a.aiAttack = true;
     if (a.aiAttack) {
       if (Math.abs(a.x) > 3.1) { this.move(a, side(a.team) * 2.6 - a.x, 0, dt); return; }
       this.throw(a, aim); a.aiAttack = false;
