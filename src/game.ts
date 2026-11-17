@@ -4,7 +4,7 @@ export type Point = { x: number; z: number };
 export const ROLES: Role[] = ['guardian', 'blaster', 'cleaner'];
 export const ROLE_INFO = {
   guardian: { name: '가디언', role: '방어형', skill: '쓰레기 반사막', cooldown: 15, color: '#70caff', description: '5초 동안 날아오는 쓰레기를 반사해요.', hint: '경계선 근처에서 사용 · 5초 지속' },
-  blaster: { name: '블래스터', role: '공격형', skill: '오염 폭탄', cooldown: 15, color: '#ffb15c', description: '오염 폭탄으로 상대 구역에 쓰레기 5개!', hint: '투척 자원 2개 소비 · 마우스로 조준' },
+  blaster: { name: '블래스터', role: '공격형', skill: '오염 폭탄', cooldown: 15, color: '#ffb15c', description: '오염 폭탄으로 상대 구역에 쓰레기 5개!', hint: '자원 소비 없음 · 마우스로 조준' },
   cleaner: { name: '클리너', role: '정화형', skill: '강력 흡입', cooldown: 8, color: '#b6f879', description: '주변 쓰레기 3개를 한 번에 정화해요.', hint: '주변 최대 3개 제거 · 자원 획득 가능' },
 };
 export interface Actor extends Point {
@@ -130,8 +130,7 @@ export class Game {
       this.shields.push({ id: this.id++, team: a.team, z: clamp(a.z, -4, 4), until: this.time + 5 });
       this.events.push({ type: 'shield', team: a.team, x: side(a.team) * .4, z: a.z });
     } else if (a.role === 'blaster') {
-      if (a.resources < 2) return '오염 폭탄에는 투척 자원 2개가 필요해요.';
-      a.resources -= 2; this.launch(a, aim, true);
+      this.launch(a, aim, true);
     } else {
       const targets = this.trash.filter(t => t.team === a.team && distance(t, a) <= 3.8 && (t.claimed === null || t.claimed === a.id))
         .sort((t, u) => distance(t, a) - distance(u, a)).slice(0, 3);
@@ -151,8 +150,8 @@ export class Game {
       this.skill(a, aim);
     }
     if (a.role === 'cleaner' && this.trash.filter(t => t.team === a.team && distance(t, a) <= 3.8 && t.claimed === null).length >= 2) this.skill(a, aim);
-    if (a.role === 'blaster' && a.resources >= 2 && this.time >= a.skillReady) { this.skill(a, aim); a.aiAttack = false; }
-    const attackCost = a.role === 'blaster' && this.time < a.skillReady ? 1 : 3;
+    if (a.role === 'blaster' && this.time >= a.skillReady) { this.skill(a, aim); a.aiAttack = false; }
+    const attackCost = a.role === 'blaster' ? 1 : 3;
     if (a.resources >= attackCost && this.time >= a.throwReady && !a.target) a.aiAttack = true;
     if (a.aiAttack) {
       if (Math.abs(a.x) > 3.1) { this.move(a, side(a.team) * 2.6 - a.x, 0, dt); return; }

@@ -73,12 +73,30 @@ test('basic throw requires boundary proximity, resource and three-second cooldow
   advance(g, 2); assert.equal(g.throw(p, { x: -100, z: 100 }), null);
   const shot = g.shots[0]; assert.equal(shot.to.x, 14.2); assert.equal(shot.to.z, 8.2);
 });
-test('bomb costs two resources, creates five non-recyclable scraps and respects cooldown', () => {
-  const g = solo('blaster'), p = g.player;
-  assert.ok(g.skill(p, { x: 8, z: 0 })); assert.equal(p.skillReady, 0);
-  p.resources = 3; assert.equal(g.skill(p, { x: 8, z: 0 }), null); assert.equal(p.resources, 1);
-  assert.equal(p.skillReady, 15); assert.ok(g.skill(p, { x: 8, z: 0 })); advance(g, 1.3);
-  assert.equal(g.trash.filter(t => t.team === 'red').length, 35); assert.equal(g.trash.filter(t => !t.natural).length, 5);
+test('bomb is free, creates five non-recyclable scraps and respects cooldown', () => {
+  for (const resources of [0, 3]) {
+    const g = solo('blaster'), p = g.player; p.resources = resources;
+    assert.equal(g.skill(p, { x: 8, z: 0 }), null); assert.equal(p.resources, resources);
+    assert.equal(p.skillReady, 15); assert.ok(g.skill(p, { x: 8, z: 0 })); assert.equal(g.shots.length, 1);
+    advance(g, 1.3);
+    assert.equal(g.trash.filter(t => t.team === 'red').length, 35); assert.equal(g.trash.filter(t => !t.natural).length, 5);
+    advance(g, 13.75); assert.equal(g.skill(p, { x: 8, z: 0 }), null); assert.equal(p.resources, resources);
+  }
+});
+test('every character can use its skill with no throw resources', () => {
+  for (const role of ROLES) {
+    const g = solo(role), p = g.player; p.x = -2; p.z = 0; p.resources = 0; g.trash = [];
+    g.addTrash('blue', p, false);
+    assert.equal(g.skill(p, { x: 8, z: 0 }), null);
+    assert.equal(p.resources, 0); assert.equal(p.skillReady, ROLE_INFO[role].cooldown);
+  }
+});
+test('blaster AI fires its bomb without gathering resources first', () => {
+  const g = solo(), ai = g.actors.find(a => a.team === 'red' && a.role === 'blaster')!;
+  ai.player = false; ai.resources = 0;
+  g.update(.05);
+  assert.ok(g.shots.some(s => s.actor === ai.id && s.bomb));
+  assert.equal(ai.resources, 0); assert.equal(ai.skillReady, 15.05);
 });
 test('guardian shield reflects basic debris and bombs and expires after five seconds', () => {
   for (const bomb of [false, true]) {
